@@ -1,0 +1,213 @@
+Act as a senior TypeScript engineer who knows Chrome Extensions (Manifest V3), React, and Vite very well.
+
+I want you to create a new Chrome extension project from scratch with this setup:
+
+TECH + TOOLING
+- Build system: Vite + React + TypeScript.
+- Target: Chrome Extension Manifest V3.
+- The code must run with plain `npm` in a Replit / local Node environment (no yarn/pnpm assumptions).
+
+PROJECT STRUCTURE
+Create at least these files/folders:
+
+- package.json with working scripts:
+  - "dev": vite
+  - "build": vite build
+  - "preview": vite preview
+- tsconfig.json with:
+  - "strict": true
+  - DOM libs enabled
+  - chrome types enabled (e.g. `"types": ["chrome", "vite/client"]`)
+- vite.config.ts configured for multiple entrypoints:
+  - popup entry (HTML + TSX)
+  - content script bundle
+  - optional background/service worker bundle
+- manifest.json at root (copied to dist on build).
+- src/
+  - src/popup/ – React popup UI.
+  - src/content/ – content scripts.
+  - src/background/ – background/service worker if needed.
+  - src/analytics/ – analytics utilities.
+  - src/ai/ – AI provider abstraction.
+  - src/types/ – shared types like ProblemContext, etc.
+
+Do NOT use path aliases – use relative imports only.
+
+HIGH-LEVEL BEHAVIOR
+
+This is a “multi-site coding assistant” extension for problem-solving sites.
+
+Supported sites initially:
+- leetcode.com
+- geeksforgeeks.org problem pages.
+
+Define a shared type in src/types/problemContext.ts:
+
+  export type ProblemSite = "leetcode" | "gfg" | "other";
+
+  export interface ProblemContext {
+    site: ProblemSite;
+    problemId: string;
+    title: string;
+    difficulty: string; // e.g. "easy" | "medium" | "hard" | "unknown"
+    description: string; // plain text, trimmed
+  }
+
+CONTENT SCRIPTS
+
+- In src/content/, create:
+  - leetcodeExtractor.ts
+  - gfgExtractor.ts
+  - index.ts (main content script entry)
+
+- Each extractor should export:
+  - function extractProblemContextFromDocument(doc: Document): ProblemContext | null
+
+- Implement:
+  - For LeetCode:
+    - problemId: slug from URL path after `/problems/`, before next `/`.
+    - title: the visible problem title element.
+    - difficulty: read difficulty badge text or "unknown".
+    - description: text from the problem description area; strip HTML, limit length so it’s reasonable.
+  - For GeeksforGeeks, do a best effort extraction using selectors that match current problem layout.
+
+- src/content/index.ts:
+  - Detect hostname.
+  - Call the appropriate extractor.
+  - If a ProblemContext exists, send it via chrome.runtime.sendMessage to the extension (include a specific message type like `"CM_PROBLEM_CONTEXT"`).
+
+POPUP UI (React, TS)
+
+- In src/popup/, create a React app with a single root component `PopupApp`.
+
+- Layout:
+  - Simple dark header with extension name: “Code Mentor AI”.
+  - Tabs or buttons to switch between:
+    - "Hints" (primary tab)
+    - "Analytics"
+  - Hints tab:
+    - Show current site + problem title + difficulty (from latest ProblemContext).
+    - If no context is available, show a message: “Open a LeetCode or GeeksforGeeks problem page to use the assistant.”
+    - A textarea for user notes / partial solution.
+    - A button “Ask for hint”.
+    - Area below that shows AI response in chat-bubble style (just simple divs, no complex chat framework).
+  - Analytics tab:
+    - Show total number of hint requests.
+    - Show counts per difficulty (easy / medium / hard / unknown) in a simple table.
+    - Show last 5 problems for which hints were requested (site + problemId + difficulty).
+
+- Popup should request the most recent ProblemContext on mount:
+  - listen to chrome.runtime.onMessage,
+  - or send a message to background asking for “latest context”.
+
+AI INTEGRATION (NO DIRECT OPENAI)
+
+- Do NOT hard-wire OpenAI or any proprietary API in this code.
+
+- In src/ai/types.ts define:
+
+  import type { ProblemContext } from "../types/problemContext";
+
+  export interface IAIProvider {
+    generateHint(context: ProblemContext, userNotes?: string): Promise<string>;
+  }
+
+- In src/ai/localHttpProvider.ts implement a class or function-based provider:
+
+  - It should POST to `http://localhost:11434/api/generate` (a hypothetical local model server).
+  - Request body should include:
+    - the problem context
+    - user notes
+  - Assume the response JSON shape is:
+    { hint: string }
+  - Return the hint string.
+  - Add basic error handling: if the request fails or no hint is present, throw an Error with a useful message.
+
+- In the popup Hint flow:
+  - Instantiate and use this LocalHttpAIProvider.
+  - While a hint request is in flight:
+    - disable the “Ask for hint” button
+    - show a small “Thinking…” indicator
+  - On success:
+    - show the hint text in the UI.
+  - On error:
+    - show a small red error message instead of crashing.
+
+ANALYTICS DESIGN
+
+Create src/analytics/types.ts:
+
+  import type { ProblemSite } from "../types/problemContext";
+
+  export interface HintEvent {
+    site: ProblemSite;
+    problemId: string;
+    difficulty: string;
+    timestamp: string; // ISO string
+  }
+
+Create src/analytics/storage.ts with:
+
+- A constant STORAGE_KEY = "cm-ai-analytics".
+
+- async function logHintEvent(event: HintEvent): Promise<void>
+  - Use chrome.storage.sync.get(STORAGE_KEY)
+  - Append the event to an events array
+  - Save back with chrome.storage.sync.set
+  - Gracefully handle the case where nothing exists yet.
+
+- async function getAnalyticsSummary(): Promise<{
+    total: number;
+    byDifficulty: Record<string, number>;
+    recent: HintEvent[];
+  }>
+  - Read events
+  - total = events.length
+  - byDifficulty: counts grouped by difficulty
+  - recent: last 10 events sorted by timestamp descending
+
+Whenever the user successfully receives an AI hint, call logHintEvent with an appropriate HintEvent.
+
+WIRED POPUP + CONTENT SCRIPTS
+
+- Add a simple background or use chrome.runtime.onMessage in the popup to:
+  - store the latest ProblemContext in chrome.storage or in memory in background.
+  - allow the popup to fetch that latest context when opened.
+
+- When the popup mounts:
+  - ask background for the latest context (e.g. send a message "CM_GET_LATEST_CONTEXT").
+  - if found, display it; otherwise show the “open a problem page” message.
+
+UI / UX REQUIREMENTS
+
+- Use a clean minimal dark theme (no Tailwind, no CSS frameworks).
+- Use either a small CSS file per area or CSS modules; keep styling simple but neat.
+- Popup width about 400px, vertical scroll if needed.
+- Avoid large external dependencies; React + React DOM should be the main libraries.
+
+BUILD & MANIFEST
+
+- Configure Vite so:
+  - popup.html is an HTML entry that loads the popup React bundle.
+  - content script entry is bundled and referenced in manifest.json.
+  - background/service worker (if used) is also bundled.
+
+- `manifest.json` should:
+  - use manifest_version: 3
+  - define "action" with "default_popup": "popup.html"
+  - include "permissions": ["activeTab", "scripting", "storage"]
+  - include "host_permissions": ["https://leetcode.com/*", "https://www.geeksforgeeks.org/*"]
+  - register the content script to run on those host patterns.
+
+GENERAL REQUIREMENTS
+
+- Everything must type-check with TypeScript strict mode.
+- No unresolved imports, no missing files.
+- Use modern React hooks only; no class components.
+- Keep comments short and practical; no long essays.
+- At the end, show:
+  - the final file tree,
+  - the exact commands to run:
+    - npm install
+    - npm run build
+  - and a short note on which folder (`dist/` or similar) should be loaded in Chrome via “Load unpacked”.
