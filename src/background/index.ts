@@ -1,6 +1,8 @@
 import { MESSAGE_TYPES, type ProblemContext, type ExtensionMessage } from "../types/problemContext";
+import { LocalHttpAIProvider } from "../ai/localHttpProvider";
 
 let latestContext: ProblemContext | null = null;
+const aiProvider = new LocalHttpAIProvider();
 
 chrome.runtime.onMessage.addListener(
   (message: ExtensionMessage, _sender, sendResponse) => {
@@ -25,6 +27,24 @@ chrome.runtime.onMessage.addListener(
         });
         return true;
       }
+    }
+
+    if (message.type === MESSAGE_TYPES.GENERATE_HINT) {
+      const { context, userNotes, hintLevel } = message.payload;
+      aiProvider.generateHint(context, userNotes, hintLevel || "basic")
+        .then((hint) => {
+          sendResponse({
+            type: MESSAGE_TYPES.HINT_RESPONSE,
+            payload: { hint },
+          });
+        })
+        .catch((error) => {
+          sendResponse({
+            type: MESSAGE_TYPES.HINT_RESPONSE,
+            payload: { error: error.message },
+          });
+        });
+      return true; // Keep message channel open for async response
     }
 
     return true;

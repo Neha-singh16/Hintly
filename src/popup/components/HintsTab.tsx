@@ -1,11 +1,11 @@
 import { useState } from "react";
 import type { ProblemContext } from "../../types/problemContext";
+import { MESSAGE_TYPES } from "../../types/problemContext";
 import { ProblemContextCard } from "./ProblemContextCard";
 import { EmptyState } from "./EmptyState";
 import { LoadingIndicator } from "./LoadingIndicator";
 import { ErrorMessage } from "./ErrorMessage";
 import { HintResponse } from "./HintResponse";
-import { LocalHttpAIProvider } from "../../ai/localHttpProvider";
 import { logHintEvent } from "../../analytics/storage";
 
 interface HintsTabProps {
@@ -14,6 +14,7 @@ interface HintsTabProps {
 
 export function HintsTab({ context }: HintsTabProps) {
   const [userNotes, setUserNotes] = useState("");
+  const [hintLevel, setHintLevel] = useState<"basic" | "intermediate" | "advanced">("basic");
   const [isLoading, setIsLoading] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,9 +27,21 @@ export function HintsTab({ context }: HintsTabProps) {
     setHint(null);
 
     try {
-      const provider = new LocalHttpAIProvider();
-      const generatedHint = await provider.generateHint(context, userNotes);
-      setHint(generatedHint);
+      // Send message to background service worker to generate hint
+      const response = await chrome.runtime.sendMessage({
+        type: MESSAGE_TYPES.GENERATE_HINT,
+        payload: {
+          context,
+          userNotes: userNotes || undefined,
+          hintLevel,
+        },
+      });
+
+      if (response.payload.error) {
+        throw new Error(response.payload.error);
+      }
+
+      setHint(response.payload.hint);
 
       await logHintEvent({
         site: context.site,
@@ -52,6 +65,72 @@ export function HintsTab({ context }: HintsTabProps) {
   return (
     <div className="content">
       <ProblemContextCard context={context} />
+
+      <div>
+        <label className="section-label">🎯 Hint Level</label>
+        <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+          <button
+            className={`level-button ${hintLevel === "basic" ? "active" : ""}`}
+            onClick={() => setHintLevel("basic")}
+            style={{
+              flex: 1,
+              padding: "8px 12px",
+              border: hintLevel === "basic" ? "2px solid var(--accent-blue)" : "1px solid var(--border-default)",
+              background: hintLevel === "basic" ? "var(--accent-blue)" : "var(--bg-elevated)",
+              color: hintLevel === "basic" ? "white" : "var(--text-primary)",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "12px",
+              fontWeight: "500",
+            }}
+          >
+            🌱 Basic
+            <div style={{ fontSize: "10px", opacity: 0.8, marginTop: "2px" }}>
+              Explain like I'm 5
+            </div>
+          </button>
+          <button
+            className={`level-button ${hintLevel === "intermediate" ? "active" : ""}`}
+            onClick={() => setHintLevel("intermediate")}
+            style={{
+              flex: 1,
+              padding: "8px 12px",
+              border: hintLevel === "intermediate" ? "2px solid var(--accent-blue)" : "1px solid var(--border-default)",
+              background: hintLevel === "intermediate" ? "var(--accent-blue)" : "var(--bg-elevated)",
+              color: hintLevel === "intermediate" ? "white" : "var(--text-primary)",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "12px",
+              fontWeight: "500",
+            }}
+          >
+            🚀 Intermediate
+            <div style={{ fontSize: "10px", opacity: 0.8, marginTop: "2px" }}>
+              Quick hints
+            </div>
+          </button>
+          <button
+            className={`level-button ${hintLevel === "advanced" ? "active" : ""}`}
+            onClick={() => setHintLevel("advanced")}
+            style={{
+              flex: 1,
+              padding: "8px 12px",
+              border: hintLevel === "advanced" ? "2px solid var(--accent-blue)" : "1px solid var(--border-default)",
+              background: hintLevel === "advanced" ? "var(--accent-blue)" : "var(--bg-elevated)",
+              color: hintLevel === "advanced" ? "white" : "var(--text-primary)",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "12px",
+              fontWeight: "500",
+            }}
+          >
+            🔥 Advanced
+            <div style={{ fontSize: "10px", opacity: 0.8, marginTop: "2px" }}>
+              Just the concept
+            </div>
+          </button>
+        </div>
+      </div>
 
       <div>
         <label className="section-label">Your notes or partial solution</label>

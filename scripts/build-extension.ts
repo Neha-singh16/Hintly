@@ -25,6 +25,7 @@ async function buildExtension() {
   const popupConfig: InlineConfig = {
     plugins: [react()],
     root: resolve(rootDir, "src/popup"),
+    base: "./",
     build: {
       outDir: distDir,
       emptyOutDir: false,
